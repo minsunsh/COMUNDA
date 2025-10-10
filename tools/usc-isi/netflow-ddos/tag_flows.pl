@@ -8,6 +8,7 @@
 #
 
 use Socket;
+use FindBin '$Bin';
 
 $usage="$0 path-to-folder-w-netflow path-to-folder-w-attack-files\n";
 
@@ -17,7 +18,7 @@ if ($#ARGV < 1)
     exit 1;
 }
 # Read attack names and signatures
-my $fh = new IO::File("maptags.txt");
+my $fh = new IO::File("$Bin/maptags.txt");
 %filters=();
 %attacks=();
 while(<$fh>)
@@ -91,24 +92,31 @@ for $f (sort @files)
     {
         next;
     }
-    open(my $ih, "nfdump -r $ARGV[0]/$f -o pipe |");
+    open(my $ih, "nfdump -r $ARGV[0]/$f -o csv-fast |");
     while(<$ih>)
     {
 	$line = $_;
 	$line =~ s/\n//;
-	my @items = split /\|/, $line;
-	$stime = $items[1];
-	$etime = $items[3];
-	$proto = $items[5];
-	$src = $items[9];
-	$src = inet_ntoa(pack('N',$src));
-	$sport = $items[10];
-	$dst = $items[14];
-	$dst = inet_ntoa(pack('N',$dst));
-	$dport = $items[15];
-	$flags = $items[20];
-	$pkts = $items[22];
-	$bytes = $items[23];
+	my @items = split /\,/, $line;
+	$stime = $items[2] / 1000;  # firstSeen
+    $etime = $items[3] / 1000;  # lastSeen
+
+	$proto = $items[4];
+	$src = $items[5];
+	$sport = $items[6];
+	$dst = $items[7];
+	$dport = $items[8];
+	my $flags = $items[13];
+	$pkts = $items[15];
+	$bytes = $items[16];
+
+	my $flags_numeric = 0;
+    if (index($flags, 'F') != -1) { $flags_numeric |= 1; }  # FIN
+    if (index($flags, 'S') != -1) { $flags_numeric |= 2; }  # SYN
+    if (index($flags, 'R') != -1) { $flags_numeric |= 4; }  # RST
+    if (index($flags, 'P') != -1) { $flags_numeric |= 8; }  # PSH
+    if (index($flags, 'A') != -1) { $flags_numeric |= 16; } # ACK
+    if (index($flags, 'U') != -1) { $flags_numeric |= 32; } # URG
 
 	$label = 'B';
 	for $s (sort {$a <=> $b} keys %attacks)
@@ -126,7 +134,7 @@ for $f (sort @files)
 		    if (($attacks{$s}{'filter'}{$j}{'proto'} == $proto || $attacks{$s}{'filter'}{$j}{'proto'} eq "*") &&
 			($attacks{$s}{'filter'}{$j}{'sport'} == $sport || $attacks{$s}{'filter'}{$j}{'sport'} eq "*") &&
 			($attacks{$s}{'filter'}{$j}{'dport'} == $dport || $attacks{$s}{'filter'}{$j}{'dport'} eq "*") &&
-			(($attacks{$s}{'filter'}{$j}{'flags'} & $flags) || $attacks{$s}{'filter'}{$j}{'flags'} eq "*"))
+			(($attacks{$s}{'filter'}{$j}{'flags'} & $flags_numeric) || $attacks{$s}{'filter'}{$j}{'flags'} eq "*"))
 		    {			
 			$label = 'A';
 			last;
@@ -134,6 +142,6 @@ for $f (sort @files)
 		}
 	    }
 	}
-	print "$line|$label\n";
+	print "$line,$label\n";
     }
 }
